@@ -5,7 +5,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 # ================== CONFIG ==================
-TOKEN = "YOUR_BOT_TOKEN_HERE"   # ← Get from @BotFather
+TOKEN = "8016460613:AAGc257gnXmeaYBz6I1jTtRnx9Qph1n6ofw"   # ← Get from @BotFather
 # ===========================================
 
 bot = Bot(token=TOKEN, parse_mode="HTML")
