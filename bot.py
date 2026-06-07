@@ -224,9 +224,23 @@ async def handle_guest_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not guest:
         return
 
-    # guest is a raw dict here since PTB couldn't deserialise it
+    # Log the raw structure so we can see exactly what Telegram sends
+    logger.info(f"[GUEST] raw guest_message dict: {guest}")
+
+    # guest is a raw dict — guest_query_id is a field on the Message object itself
     raw_text = (guest.get("text") or "").strip()
-    guest_query_id = guest.get("guest_query_id")
+
+    # Try all possible locations for the query ID
+    guest_query_id = (
+        guest.get("guest_query_id")          # on the message object itself (API docs)
+        or guest.get("id")                    # fallback
+    )
+
+    logger.info(f"[GUEST] text={raw_text!r}, guest_query_id={guest_query_id!r}")
+
+    if not guest_query_id:
+        logger.warning(f"[GUEST] No guest_query_id found. Full dict keys: {list(guest.keys())}")
+        return
 
     # Strip the bot mention (@username) from the text to isolate the code
     me = await context.bot.get_me()
