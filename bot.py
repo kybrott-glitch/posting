@@ -259,20 +259,24 @@ async def handle_guest_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def _answer_guest(context, guest_query_id: str, text: str, parse_mode: str = None, reply_markup=None):
     """
-    Calls answerGuestQuery via raw Bot API request since PTB v22 doesn't wrap it yet.
+    Calls answerGuestQuery via raw Bot API.
+    The API expects content wrapped in a 'message' object (InputBotInlineMessageText style).
     """
-    payload = {
-        "guest_query_id": guest_query_id,
+    message = {
+        "type": "text",
         "text": text,
     }
     if parse_mode:
-        payload["parse_mode"] = parse_mode
+        message["parse_mode"] = parse_mode
     if reply_markup:
-        payload["reply_markup"] = reply_markup.to_dict()
+        message["reply_markup"] = reply_markup.to_dict()
 
     await context.bot.do_api_request(
         endpoint="answerGuestQuery",
-        api_kwargs=payload,
+        api_kwargs={
+            "guest_query_id": guest_query_id,
+            "message": message,
+        },
     )
 
 
