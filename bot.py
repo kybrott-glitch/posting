@@ -6,11 +6,8 @@ from aiogram.enums import ParseMode
 from aiogram.types import Message
 from aiogram.filters import Command
 
-# ================== CONFIG ==================
-TOKEN = "8016460613:AAGc257gnXmeaYBz6I1jTtRnx9Qph1n6ofw"   # ← Put your token here
-# ===========================================
+TOKEN = "YOUR_BOT_TOKEN_HERE"   # ← Change this
 
-# Fixed Bot initialization
 bot = Bot(
     token=TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -18,45 +15,45 @@ bot = Bot(
 
 dp = Dispatcher()
 
-# ----------------- Start Command -----------------
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    await message.answer(
-        "👋 Hi! I'm a Guest Mode enabled bot.\n\n"
-        "You can now mention me with <code>@YourBot</code> in any chat!"
-    )
+    await message.answer("✅ Bot is running!\nTag me like @YourBot hello")
 
-
-# ----------------- Guest Mode Handler -----------------
-@dp.message(F.guest_query_id)
+# === IMPROVED GUEST MODE HANDLER ===
+@dp.message(F.guest_query_id)          # Primary filter
 async def guest_mode_handler(message: Message):
-    user = message.guest_bot_caller_user or message.from_user
-    query_text = message.text or "[media or non-text message]"
+    try:
+        user = message.guest_bot_caller_user or message.from_user
+        text = message.text or "[non-text message]"
 
-    logging.info(f"Guest query from {user.full_name} ({user.id})")
+        logging.info(f"✅ Guest query received from {user.full_name} in chat {message.chat.id}")
 
-    reply_text = (
-        f"👋 Hello <b>{user.full_name}</b>!\n\n"
-        f"You tagged me in this chat.\n"
-        f"Message: <i>{query_text}</i>\n\n"
-        "I'm working in <b>Guest Mode</b> 🚀"
-    )
+        reply = (
+            f"👋 Hi <b>{user.full_name}</b>!\n\n"
+            f"You tagged me!\n"
+            f"Your message: <i>{text}</i>\n\n"
+            "<b>Guest Mode Working</b> ✅"
+        )
 
-    await message.answer_guest_query(reply_text)
+        await message.answer_guest_query(reply)
+        print("✅ Replied successfully in Guest Mode")
+        
+    except Exception as e:
+        print(f"Error in guest handler: {e}")
 
 
-# ----------------- Regular messages -----------------
+# Fallback for normal chats
 @dp.message()
-async def echo(message: Message):
+async def normal_handler(message: Message):
     if message.guest_query_id:
-        return  # already handled by guest handler
-    await message.answer("I received your message normally.")
+        return
+    await message.answer("Bot received normal message.")
 
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("🤖 Bot started successfully with Guest Mode!")
-    await dp.start_polling(bot)
+    print("🤖 Bot started - Guest Mode should work now")
+    await dp.start_polling(bot, skip_updates=True)
 
 
 if __name__ == "__main__":
