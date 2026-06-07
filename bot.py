@@ -1,7 +1,7 @@
 """
-Telegram Inline Post Bot
-- Admin-only post creation with premium emoji + colored inline buttons
-- Inline query: @botusername #code → sends the post anywhere
+Megen Post Bot — Guest Mode edition
+- Admin PM: /newpost to create posts with premium emoji + buttons
+- Anywhere: @botusername code → bot replies directly into that chat (no join needed)
 """
 
 import logging
@@ -9,23 +9,19 @@ import re
 import json
 from telegram import (
     Update,
-    InlineQueryResultArticle,
-    InputTextMessageContent,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InlineQueryResultCachedDocument,
 )
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    InlineQueryHandler,
     ConversationHandler,
+    TypeHandler,
     ContextTypes,
     filters,
 )
 from telegram.constants import ParseMode
-import uuid
 
 from config import BOT_TOKEN, ADMIN_IDS
 from database import db
@@ -36,51 +32,51 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Conversation states
-(
-    ASK_CODE,
-    ASK_TEXT,
-    ASK_BUTTONS,
-    CONFIRM,
-) = range(4)
+# ── Conversation states ───────────────────────────────────────────────────────
+ASK_CODE, ASK_TEXT, ASK_BUTTONS, CONFIRM = range(4)
 
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
-# ─── /start ───────────────────────────────────────────────────────────────────
+def build_keyboard(buttons: list) -> InlineKeyboardMarkup | None:
+    if not buttons:
+        return None
+    rows = [[InlineKeyboardButton(text=b["label"], url=b["url"])] for b in buttons]
+    return InlineKeyboardMarkup(rows)
+
+
+# ── /start ────────────────────────────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text("⛔ You don't have access to this bot.")
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ No access.")
         return
-
     await update.message.reply_text(
-        "👑 *Megen Post Bot*\n\n"
+        "👑 <b>Megen Post Bot</b>\n\n"
         "Commands:\n"
-        "/newpost — Create a new post\n"
-        "/listposts — View all saved posts\n"
-        "/deletepost — Delete a post by code\n\n"
-        "Once created, use `@yourbotname #code` in any chat to send a post.",
-        parse_mode=ParseMode.MARKDOWN,
+        "/newpost — Create a post\n"
+        "/listposts — See all posts\n"
+        "/deletepost &lt;code&gt; — Remove a post\n\n"
+        "Then in any chat, mention <code>@yourbotname code</code> "
+        "and the bot will reply with the post.",
+        parse_mode=ParseMode.HTML,
     )
 
 
-# ─── /newpost conversation ────────────────────────────────────────────────────
+# ── /newpost conversation ─────────────────────────────────────────────────────
 
 async def newpost_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return ConversationHandler.END
-
-    context.user_data["new_post"] = {}
+    context.user_data["np"] = {}
     await update.message.reply_text(
-        "📝 *New Post Setup*\n\n"
-        "Step 1/3 — Enter a short *code* for this post (letters, numbers, hyphens only).\n"
-        "Example: `summer-drop` or `promo1`\n\n"
-        "This is what you'll type as `#code` in the inline query.",
-        parse_mode=ParseMode.MARKDOWN,
+        "📝 <b>Step 1/3 — Code</b>\n\n"
+        "Give this post a short code (letters, numbers, hyphens only).\n"
+        "Example: <code>summer-drop</code>, <code>promo1</code>, <code>nft-launch</code>\n\n"
+        "This is what users will type after your bot username.",
+        parse_mode=ParseMode.HTML,
     )
     return ASK_CODE
 
@@ -88,50 +84,39 @@ async def newpost_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def newpost_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = update.message.text.strip().lower()
     if not re.match(r'^[a-z0-9\-]+$', code):
-        await update.message.reply_text(
-            "❌ Invalid code. Use only letters, numbers, and hyphens. Try again:"
-        )
+        await update.message.reply_text("❌ Letters, numbers, hyphens only. Try again:")
         return ASK_CODE
-
     if db.get_post(code):
         await update.message.reply_text(
-            f"❌ Code `{code}` already exists. Use /deletepost first or pick another code:",
-            parse_mode=ParseMode.MARKDOWN,
+            f"❌ Code <code>{code}</code> already exists. Pick another:",
+            parse_mode=ParseMode.HTML,
         )
         return ASK_CODE
 
-    context.user_data["new_post"]["code"] = code
+    context.user_data["np"]["code"] = code
     await update.message.reply_text(
         "✅ Code set!\n\n"
-        "Step 2/3 — Send the *post text*.\n\n"
-        "You can use:\n"
-        "• HTML formatting (`<b>`, `<i>`, `<code>`, `<a href='...'>`, etc.)\n"
-        "• Custom emoji like `<tg-emoji emoji-id='12345'>🔥</tg-emoji>`\n\n"
-        "Just paste your full message content:",
-        parse_mode=ParseMode.MARKDOWN,
+        "📝 <b>Step 2/3 — Post text</b>\n\n"
+        "Send your message. Use HTML formatting:\n"
+        "<code>&lt;b&gt;bold&lt;/b&gt;</code>, <code>&lt;i&gt;italic&lt;/i&gt;</code>, "
+        "<code>&lt;a href='url'&gt;link&lt;/a&gt;</code>\n\n"
+        "For custom premium emoji:\n"
+        "<code>&lt;tg-emoji emoji-id='5368324170671202286'&gt;🔥&lt;/tg-emoji&gt;</code>",
+        parse_mode=ParseMode.HTML,
     )
     return ASK_TEXT
 
 
 async def newpost_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Store raw text with entities (to preserve premium emoji)
-    msg = update.message
-    context.user_data["new_post"]["text"] = msg.text or msg.caption or ""
-    context.user_data["new_post"]["entities"] = (
-        [e.to_dict() for e in msg.entities] if msg.entities else []
-    )
-
+    context.user_data["np"]["text"] = update.message.text or ""
     await update.message.reply_text(
         "✅ Text saved!\n\n"
-        "Step 3/3 — Add *inline buttons* (up to 5).\n\n"
-        "Format each button on a new line:\n"
-        "`Button Label | https://link.com`\n\n"
-        "For colored buttons, prefix the label:\n"
-        "`🟢 Buy Now | https://...`\n"
-        "`🔴 Urgent | https://...`\n"
-        "`🔵 Info | https://...`\n\n"
-        "Send /skip to add no buttons.",
-        parse_mode=ParseMode.MARKDOWN,
+        "📝 <b>Step 3/3 — Buttons</b>\n\n"
+        "Add up to 5 inline buttons, one per line:\n"
+        "<code>🔥 Buy Now | https://fragment.com</code>\n"
+        "<code>🔵 Channel | https://t.me/yourchannel</code>\n\n"
+        "Emoji in the label = the 'color'. Or /skip for no buttons.",
+        parse_mode=ParseMode.HTML,
     )
     return ASK_BUTTONS
 
@@ -139,66 +124,53 @@ async def newpost_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def newpost_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     buttons = []
-
     if text != "/skip":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         if len(lines) > 5:
-            await update.message.reply_text("❌ Maximum 5 buttons. Try again:")
+            await update.message.reply_text("❌ Max 5 buttons. Try again:")
             return ASK_BUTTONS
-
         for line in lines:
             if "|" not in line:
                 await update.message.reply_text(
-                    f"❌ Invalid format: `{line}`\nUse: `Label | https://url`",
-                    parse_mode=ParseMode.MARKDOWN,
+                    f"❌ Bad format: <code>{line}</code>\nUse: Label | https://url",
+                    parse_mode=ParseMode.HTML,
                 )
                 return ASK_BUTTONS
-            parts = line.split("|", 1)
-            label = parts[0].strip()
-            url = parts[1].strip()
+            label, url = line.split("|", 1)
+            url = url.strip()
             if not url.startswith("http"):
-                await update.message.reply_text(
-                    f"❌ Invalid URL: `{url}`", parse_mode=ParseMode.MARKDOWN
-                )
+                await update.message.reply_text(f"❌ Invalid URL: <code>{url}</code>", parse_mode=ParseMode.HTML)
                 return ASK_BUTTONS
-            buttons.append({"label": label, "url": url})
+            buttons.append({"label": label.strip(), "url": url})
 
-    context.user_data["new_post"]["buttons"] = buttons
-    post = context.user_data["new_post"]
-
-    # Preview
-    btn_preview = "\n".join(
-        [f"  • {b['label']} → {b['url']}" for b in buttons]
-    ) or "  (none)"
+    context.user_data["np"]["buttons"] = buttons
+    np = context.user_data["np"]
+    btn_preview = "\n".join(f"  • {b['label']} → {b['url']}" for b in buttons) or "  (none)"
 
     await update.message.reply_text(
-        f"📋 *Preview your post:*\n\n"
-        f"*Code:* `#{post['code']}`\n"
-        f"*Text:* _{post['text'][:100]}{'...' if len(post['text']) > 100 else ''}_\n"
-        f"*Buttons:*\n{btn_preview}\n\n"
-        "Send /confirm to save, or /cancel to discard.",
-        parse_mode=ParseMode.MARKDOWN,
+        f"📋 <b>Preview</b>\n\n"
+        f"Code: <code>{np['code']}</code>\n"
+        f"Text: <i>{np['text'][:120]}{'…' if len(np['text']) > 120 else ''}</i>\n"
+        f"Buttons:\n{btn_preview}\n\n"
+        "Send /confirm to save or /cancel to discard.",
+        parse_mode=ParseMode.HTML,
     )
     return CONFIRM
 
 
 async def newpost_skip_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_post"]["buttons"] = []
+    update.message.text = "/skip"
     return await newpost_buttons(update, context)
 
 
 async def newpost_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    post = context.user_data["new_post"]
-    db.save_post(
-        code=post["code"],
-        text=post["text"],
-        entities=post.get("entities", []),
-        buttons=post["buttons"],
-    )
+    np = context.user_data["np"]
+    db.save_post(code=np["code"], text=np["text"], buttons=np["buttons"])
+    me = await context.bot.get_me()
     await update.message.reply_text(
-        f"✅ Post `#{post['code']}` saved!\n\n"
-        f"Use it anywhere: `@{context.bot.username} #{post['code']}`",
-        parse_mode=ParseMode.MARKDOWN,
+        f"✅ Post <code>{np['code']}</code> saved!\n\n"
+        f"Use it anywhere: mention <code>@{me.username} {np['code']}</code> in any chat.",
+        parse_mode=ParseMode.HTML,
     )
     context.user_data.clear()
     return ConversationHandler.END
@@ -206,148 +178,136 @@ async def newpost_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def newpost_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("❌ Post creation cancelled.")
+    await update.message.reply_text("❌ Cancelled.")
     return ConversationHandler.END
 
 
-# ─── /listposts ───────────────────────────────────────────────────────────────
+# ── /listposts ────────────────────────────────────────────────────────────────
 
 async def list_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-
     posts = db.get_all_posts()
     if not posts:
-        await update.message.reply_text("No posts saved yet. Use /newpost to create one.")
+        await update.message.reply_text("No posts yet. Use /newpost.")
         return
-
-    lines = []
-    for p in posts:
-        btn_count = len(p["buttons"])
-        lines.append(f"• `#{p['code']}` — {btn_count} button(s)")
-
+    lines = [f"• <code>{p['code']}</code> — {len(p['buttons'])} button(s)" for p in posts]
     await update.message.reply_text(
-        "📚 *Saved Posts:*\n\n" + "\n".join(lines),
-        parse_mode=ParseMode.MARKDOWN,
+        "📚 <b>Saved Posts:</b>\n\n" + "\n".join(lines),
+        parse_mode=ParseMode.HTML,
     )
 
 
-# ─── /deletepost ──────────────────────────────────────────────────────────────
+# ── /deletepost ───────────────────────────────────────────────────────────────
 
 async def delete_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-
-    args = context.args
-    if not args:
-        await update.message.reply_text(
-            "Usage: `/deletepost <code>`", parse_mode=ParseMode.MARKDOWN
-        )
+    if not context.args:
+        await update.message.reply_text("Usage: /deletepost &lt;code&gt;", parse_mode=ParseMode.HTML)
         return
-
-    code = args[0].lstrip("#").lower()
+    code = context.args[0].lower()
     if db.delete_post(code):
-        await update.message.reply_text(f"🗑 Post `#{code}` deleted.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"🗑 Post <code>{code}</code> deleted.", parse_mode=ParseMode.HTML)
     else:
-        await update.message.reply_text(f"❌ Post `#{code}` not found.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"❌ Post <code>{code}</code> not found.", parse_mode=ParseMode.HTML)
 
 
-# ─── Inline query handler ─────────────────────────────────────────────────────
+# ── Guest Mode handler ────────────────────────────────────────────────────────
 
-def build_keyboard(buttons: list) -> InlineKeyboardMarkup | None:
-    if not buttons:
-        return None
-
-    # Build rows: 1 button per row for clean look (up to 5)
-    rows = []
-    for btn in buttons:
-        rows.append([InlineKeyboardButton(text=btn["label"], url=btn["url"])])
-
-    return InlineKeyboardMarkup(rows)
-
-
-async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.inline_query.query.strip()
-
-    # Match #code pattern
-    match = re.match(r'^#([a-z0-9\-]+)$', query.lower())
-    if not match:
-        # Show hint if they type nothing or just #
-        if query == "" or query == "#":
-            await update.inline_query.answer(
-                [],
-                switch_pm_text="Type #code to send a post",
-                switch_pm_parameter="inline_help",
-                cache_time=0,
-            )
+async def handle_guest_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Fired when someone mentions @yourbot code in a chat the bot hasn't joined.
+    update.guest_message contains the message + guest_query_id token.
+    We call answerGuestQuery via raw API (PTB doesn't wrap it yet).
+    """
+    guest = update.guest_message  # telegram.Message-like object
+    if not guest:
         return
 
-    code = match.group(1)
+    raw_text = (guest.text or "").strip()
+    guest_query_id = guest.guest_query_id
+
+    # Strip the bot mention (@username) from the text to isolate the code
+    me = await context.bot.get_me()
+    code = re.sub(rf'@{re.escape(me.username)}\s*', '', raw_text, flags=re.IGNORECASE).strip().lower()
+    code = re.sub(r'\s+', '-', code)  # allow spaces as separators too
+
+    if not code:
+        await _answer_guest(context, guest_query_id, text="❓ Send a post code after my username.")
+        return
+
     post = db.get_post(code)
     if not post:
-        await update.inline_query.answer(
-            [],
-            switch_pm_text=f"Post #{code} not found",
-            switch_pm_parameter="inline_help",
-            cache_time=0,
+        await _answer_guest(
+            context,
+            guest_query_id,
+            text=f"❌ No post found for code: <code>{code}</code>",
+            parse_mode="HTML",
         )
         return
 
     keyboard = build_keyboard(post["buttons"])
-
-    result = InlineQueryResultArticle(
-        id=str(uuid.uuid4()),
-        title=f"📨 Post #{post['code']}",
-        description=post["text"][:100],
-        input_message_content=InputTextMessageContent(
-            message_text=post["text"],
-            parse_mode=ParseMode.HTML,
-        ),
+    await _answer_guest(
+        context,
+        guest_query_id,
+        text=post["text"],
+        parse_mode="HTML",
         reply_markup=keyboard,
     )
 
-    await update.inline_query.answer(
-        [result],
-        cache_time=0,  # Don't cache so edits reflect immediately
+
+async def _answer_guest(context, guest_query_id: str, text: str, parse_mode: str = None, reply_markup=None):
+    """
+    Calls answerGuestQuery via raw Bot API request since PTB v22 doesn't wrap it yet.
+    """
+    payload = {
+        "guest_query_id": guest_query_id,
+        "text": text,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if reply_markup:
+        payload["reply_markup"] = reply_markup.to_dict()
+
+    await context.bot.do_api_request(
+        endpoint="answerGuestQuery",
+        api_kwargs=payload,
     )
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # /start
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("listposts", list_posts))
+    app.add_handler(CommandHandler("deletepost", delete_post))
 
     # /newpost conversation
-    conv = ConversationHandler(
+    app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("newpost", newpost_start)],
         states={
-            ASK_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, newpost_code)],
-            ASK_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, newpost_text)],
+            ASK_CODE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, newpost_code)],
+            ASK_TEXT:    [MessageHandler(filters.TEXT & ~filters.COMMAND, newpost_text)],
             ASK_BUTTONS: [
                 CommandHandler("skip", newpost_skip_buttons),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, newpost_buttons),
             ],
             CONFIRM: [
                 CommandHandler("confirm", newpost_confirm),
-                CommandHandler("cancel", newpost_cancel),
+                CommandHandler("cancel",  newpost_cancel),
             ],
         },
         fallbacks=[CommandHandler("cancel", newpost_cancel)],
-    )
-    app.add_handler(conv)
+    ))
 
-    # /listposts, /deletepost
-    app.add_handler(CommandHandler("listposts", list_posts))
-    app.add_handler(CommandHandler("deletepost", delete_post))
+    # Guest mode — raw Update type filter for guest_message field
+    app.add_handler(TypeHandler(Update, handle_guest_message), group=1)
 
-    # Inline queries
-    app.add_handler(InlineQueryHandler(inline_query))
-
-    logger.info("Bot started.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("Bot is running.")
+    app.run_polling(allowed_updates=["message", "guest_message"])
 
 
 if __name__ == "__main__":
