@@ -7,7 +7,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 # ================== CONFIG ==================
-TOKEN = "YOUR_BOT_TOKEN_HERE"   # ← Put your token here
+TOKEN = "8016460613:AAGc257gnXmeaYBz6I1jTtRnx9Qph1n6ofw"   # ← Put your token here
 # ===========================================
 
 # Fixed Bot initialization
