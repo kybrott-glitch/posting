@@ -217,14 +217,19 @@ async def delete_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_guest_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Fired when Telegram sends a guest_message update (bot tagged in a chat it hasn't joined).
-    PTB 21.6 doesn't know this field yet (Bot API May 2026), so it lands in update.api_kwargs.
+    Fired when Telegram sends a guest_message update.
+    Log everything so we can see the raw structure.
     """
+    # Log every update to understand structure
+    try:
+        logger.info(f"[RAW] update_id={update.update_id} dict={update.to_dict()} api_kwargs={update.api_kwargs}")
+    except Exception as e:
+        logger.info(f"[RAW] log error: {e}")
+
     guest = update.api_kwargs.get("guest_message") if update.api_kwargs else None
     if not guest:
         return
 
-    # Log the raw structure so we can see exactly what Telegram sends
     logger.info(f"[GUEST] raw guest_message dict: {guest}")
 
     # guest is a raw dict — guest_query_id is a field on the Message object itself
