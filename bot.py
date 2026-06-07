@@ -6,7 +6,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import Message
 from aiogram.filters import Command
 
-TOKEN = "YOUR_BOT_TOKEN_HERE"   # ← Change this
+TOKEN = "8016460613:AAGc257gnXmeaYBz6I1jTtRnx9Qph1n6ofw"   # ← Change this
 
 bot = Bot(
     token=TOKEN,
