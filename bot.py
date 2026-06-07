@@ -217,16 +217,16 @@ async def delete_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_guest_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Fired when someone mentions @yourbot code in a chat the bot hasn't joined.
-    update.guest_message contains the message + guest_query_id token.
-    We call answerGuestQuery via raw API (PTB doesn't wrap it yet).
+    Fired when Telegram sends a guest_message update (bot tagged in a chat it hasn't joined).
+    PTB 21.6 doesn't know this field yet (Bot API May 2026), so it lands in update.api_kwargs.
     """
-    guest = update.guest_message  # telegram.Message-like object
+    guest = update.api_kwargs.get("guest_message") if update.api_kwargs else None
     if not guest:
         return
 
-    raw_text = (guest.text or "").strip()
-    guest_query_id = guest.guest_query_id
+    # guest is a raw dict here since PTB couldn't deserialise it
+    raw_text = (guest.get("text") or "").strip()
+    guest_query_id = guest.get("guest_query_id")
 
     # Strip the bot mention (@username) from the text to isolate the code
     me = await context.bot.get_me()
@@ -307,7 +307,10 @@ def main():
     app.add_handler(TypeHandler(Update, handle_guest_message), group=1)
 
     logger.info("Bot is running.")
-    app.run_polling(allowed_updates=["message", "guest_message"])
+    # ALL_TYPES covers standard PTB update types. We append "guest_message" manually
+    # since PTB 21.6 doesn't know it yet — Telegram will still send it.
+    allowed = list(Update.ALL_TYPES) + ["guest_message"]
+    app.run_polling(allowed_updates=allowed, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
